@@ -28,8 +28,6 @@ import "./BancorFormula.sol";
  */
 
 contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, ReentrancyGuard, Ownable {
-    //FIXME: add mechanism to mitigate front running attacks
-
     using SafeMath for uint256;
 
     using Address for address payable; // prettier-ignore

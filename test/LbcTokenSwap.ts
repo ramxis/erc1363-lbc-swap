@@ -2,21 +2,16 @@ import {
   time,
   loadFixture,
 } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { any } from "hardhat/internal/core/params/argumentTypes";
 
 describe("LbcTokenSwap", function () {
 
-  // TODO: add tests for front running with higher gas
-  // TODO: add tests for setting gasprice function
-  
   // We define a fixtures to reuse the same setup in every test.
   // We use loadFixture to run this setup once, snapshot that state,
   // and reset Hardhat Network to that snapshot in every test.
 
-  // fixture used for tests related to 'Deployment' and 'Minting ERC1363 tokens'
+  // fixture used for tests related to "Deployment" and "Minting ERC1363 tokens"
   async function deployLBCSwapContractAndMithrilToken() {
 
 
@@ -29,9 +24,9 @@ describe("LbcTokenSwap", function () {
     const initialTokenSupply = ethers.parseEther("10");
     const reserveRatio = Math.round(1 / 2 * 1000000) / 1000000; //  recall 1/2 corresponds to LBC
     const solReserveRatio = Math.floor(reserveRatio * 1000000);
-    let gasPrice = ethers.parseUnits("30","gwei");
+    let defaultGasPrice = ethers.parseUnits("30","gwei");
 
-    const lbcSwap = await ethers.deployContract("LbcTokenSwap", [salt,solReserveRatio,initialTokenSupply, gasPrice]);
+    const lbcSwap = await ethers.deployContract("LbcTokenSwap", [salt,solReserveRatio,initialTokenSupply, defaultGasPrice]);
     await lbcSwap.waitForDeployment();
     
     const tokenAddress = await lbcSwap.tokenAddress();
@@ -39,12 +34,12 @@ describe("LbcTokenSwap", function () {
     const swapAddress = await lbcSwap.getAddress();
     
 
-    return { lbcSwap, mithrilToken, alice, bob, otherEOAs, swapAddress, solReserveRatio, initialTokenSupply };
+    return { lbcSwap, mithrilToken, alice, bob, otherEOAs, swapAddress, solReserveRatio, initialTokenSupply, defaultGasPrice };
   }
 
-  // fixture used for tests related to 'Burning of ERC1363 tokens'
+  // fixture used for tests related to "Burning of ERC1363 tokens"
   async function testSetupForTokenBurn() {
-    const { lbcSwap, mithrilToken, alice, otherEOAs, swapAddress ,solReserveRatio, initialTokenSupply } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+    const { lbcSwap, mithrilToken, alice, bob, otherEOAs, swapAddress ,solReserveRatio, initialTokenSupply, defaultGasPrice } = await loadFixture(deployLBCSwapContractAndMithrilToken);
     
     let tx = {
       to: await lbcSwap.getAddress(),
@@ -65,7 +60,7 @@ describe("LbcTokenSwap", function () {
     transaction = await fakeMithrilToken.connect(attacker).mint(attacker.address, ethers.parseEther("10"));
     await transaction.wait();
 
-    return { lbcSwap, mithrilToken, alice, attacker, fakeMithrilToken, swapAddress, solReserveRatio, initialTokenSupply };
+    return { lbcSwap, mithrilToken, alice, bob, attacker, fakeMithrilToken, swapAddress, solReserveRatio, initialTokenSupply, defaultGasPrice };
 
   }
 
@@ -131,7 +126,7 @@ describe("LbcTokenSwap", function () {
 
     });
 
-    it('should mint tokens a second time correctly', async () => {
+    it("should mint tokens a second time correctly", async () => {
       const { mithrilToken, alice, bob, solReserveRatio, lbcSwap, swapAddress } = await loadFixture(deployLBCSwapContractAndMithrilToken);
     
       let tx = {
@@ -167,7 +162,44 @@ describe("LbcTokenSwap", function () {
     
     });
 
-    it('should not be able to mint anything with 0 ETH', async () => {
+    it("should be able to accept large amount of eth and mint tokens", async () => {
+
+      const { mithrilToken, alice, bob, solReserveRatio, lbcSwap, swapAddress } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+
+      let tx = {
+        to: swapAddress,
+        value: ethers.parseEther("10")
+      };
+      
+      // alice send 10 ETH to the contract as in the previous test
+      let transaction = await alice.sendTransaction(tx);
+      await transaction.wait();
+
+      tx = {
+        to: swapAddress,
+        value: ethers.parseEther("9000")
+      };
+
+      // bob sends 9000 ETH to the contract after alice, pushing the price higher
+      transaction = await bob.sendTransaction(tx);
+      await transaction.wait();
+
+
+      const finalContractBalance = await lbcSwap.poolBalance();
+
+      expect(finalContractBalance).to.equal(ethers.parseEther("9010"));
+      
+      // mithril total supply should now be Alice + Bob
+      const userMithrilBalance = (await mithrilToken.balanceOf(alice.address)) 
+      + (await mithrilToken.balanceOf(bob.address));
+      
+      expect(await mithrilToken.totalSupply()).to.equal(userMithrilBalance);
+
+      await expect(transaction).to.emit(lbcSwap, "LogMint");
+
+    });
+
+    it("should not be able to mint anything with 0 ETH", async () => {
       const { alice, swapAddress } = await loadFixture(deployLBCSwapContractAndMithrilToken);
     
       let tx = {
@@ -175,9 +207,8 @@ describe("LbcTokenSwap", function () {
         value: 0
       };
       
-      // let transaction = await alice.sendTransaction(tx);
       await expect(alice.sendTransaction(tx)).to.be.
-      revertedWith('FORBIDDEN: only nonzero eth values are accepted');
+      revertedWith("FORBIDDEN: only nonzero eth values are accepted");
 
     });
     
@@ -287,23 +318,19 @@ describe("LbcTokenSwap", function () {
   describe("Front running should be mititgated", function () {
 
     it("Should revert when attempting to mint with gas price higher then set in the swap contract", async function () {
-      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
-      // TODO: add tx for mint with higher gas price
-      await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
-      .revertedWith("Ownable: caller is not the owner");
-
-    });
-
-    it("Should revert when attempting to burn with gas price higher then set in the swap contract", async function () {
-      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
-       // TODO: add tx for mint with higher gas price
-      await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
-      .revertedWith("Ownable: caller is not the owner");
+      const { swapAddress, bob, defaultGasPrice } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+    
+      let tx = {
+        to: swapAddress,
+        value: 10,
+        gasPrice: defaultGasPrice + ethers.parseUnits("20", "gwei"),
+      };
+      
+      await expect(bob.sendTransaction(tx)).to.be.
+      revertedWith("FORBIDDEN: Invalid gas price");
 
     });
 
   });
 
-  // TODO: add ci cd for tests and coverage
-  // TODO: may be add checks for slither ? depends upon time
 });
