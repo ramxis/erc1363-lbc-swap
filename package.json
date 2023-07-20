@@ -15,7 +15,8 @@
     "test": "hardhat test",
     "autoLintSolidity": "npx prettier --write contracts/**/**/*.sol",
     "linter": "solhint -f table contracts/**/*.sol",
-    "coverage": "hardhat coverage"
+    "coverage": "hardhat coverage",
+    "localDeploy": "npx hardhat run --network localhost scripts/FactoryDeploy.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.4",

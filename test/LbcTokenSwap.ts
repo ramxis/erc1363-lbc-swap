@@ -174,6 +174,9 @@ describe("LbcTokenSwap", function () {
       // alice send 10 ETH to the contract as in the previous test
       let transaction = await alice.sendTransaction(tx);
       await transaction.wait();
+      const tokenBalanceAfterAlice = await mithrilToken.totalSupply();
+
+      const tokensForBob = await lbcSwap.calculatePurchaseReturn(mithrilToken.totalSupply(), ethers.parseEther("10"), solReserveRatio, ethers.parseEther("2000"));
 
       tx = {
         to: swapAddress,
@@ -306,7 +309,7 @@ describe("LbcTokenSwap", function () {
     });
 
     it("Should not be able to change gasPrice if caller is not owner", async function () {
-      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+      const { lbcSwap, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
 
       await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
       .revertedWith("Ownable: caller is not the owner");
@@ -332,5 +335,4 @@ describe("LbcTokenSwap", function () {
     });
 
   });
-
 });
