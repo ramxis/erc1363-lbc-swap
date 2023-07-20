@@ -27,7 +27,7 @@ import "./BancorFormula.sol";
  *      reserveRatio = 1/2
  */
 
-contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, ReentrancyGuard {
+contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, ReentrancyGuard, Ownable {
     //FIXME: add mechanism to mitigate front running attacks
 
     using SafeMath for uint256;
@@ -53,6 +53,13 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
 
     // the address of the token which will be deployed and is used in the linear bonding curver
     address public immutable tokenAddress;
+
+    /**
+     * - to prevent front running attacks
+     * - gas price limit prevents users from having control over the order of execution
+     */
+
+    uint256 public gasPrice = 0 wei;
 
     /**
      * @dev it is used to keep track of contracts ether balance
@@ -86,17 +93,24 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      */
     event LogBurn(address indexed sender, uint256 amountBurnt, uint256 reward);
 
+    // verifies that the gas price is lower than the universal limit
+    modifier isGasPriceValid() {
+        require(tx.gasprice <= gasPrice, "FORBIDDEN: Invalid gas price");
+        _;
+    }
+
     /**
      * @param _salt bytes32 salt to precommpute the erc1363 token address before deployment
      * @param _reserveRatio to set reserveRatio for the curver
      * @param _initialSupply bootstrap liquidity by minting an initial supply
      */
-    constructor(bytes32 _salt, uint32 _reserveRatio, uint256 _initialSupply) {
+    constructor(bytes32 _salt, uint32 _reserveRatio, uint256 _initialSupply, uint256 _gasPrice) {
         tokenAddress = getAddress(getBytecode(), _salt);
         deployTokenContract(_salt);
         mithrilToken = MyERC1363Token(tokenAddress);
         mithrilToken.mint(msg.sender, _initialSupply);
         reserveRatio = _reserveRatio;
+        gasPrice = _gasPrice;
     }
 
     /**
@@ -106,6 +120,8 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      */
     receive() external payable {
         // increament pool balance
+        require(msg.value > 0, "FORBIDDEN: only nonzero eth values are accepted");
+        require(tx.gasprice <= gasPrice, "FORBIDDEN: Invalid gas price");
         poolBalance = poolBalance.add(msg.value);
         uint256 tokensToMint = estimateTokenAmountForPrice(msg.value);
         mintMithril(msg.sender, tokensToMint);
@@ -133,7 +149,7 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      * @param _account -  EOA / contract which receives the newly minted Mithril
      * @param _amount -  // amount in TKNbits
      */
-    function mintMithril(address _account, uint256 _amount) internal returns (bool) {
+    function mintMithril(address _account, uint256 _amount) internal isGasPriceValid returns (bool) {
         mithrilToken.mint(_account, _amount);
 
         emit LogMint(_account, _amount, msg.value);
@@ -183,11 +199,7 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
         address payable transferAddress,
         uint256 tokenAmount,
         uint256 reward
-    ) internal nonReentrant {
-        // // Check if the call was successful
-        // require(success, "Token burn failed");
-        //TODO: check if tokens transfered to this contract are now owned by this contract and burning them is correct
-        // TDOO: or if we have manually reduce token supply and burntokensfrom tranferAddress
+    ) internal isGasPriceValid nonReentrant {
         mithrilToken.burn(tokenAmount); // can revert in certain situations
 
         poolBalance = poolBalance.sub(reward);
@@ -195,10 +207,6 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
         transferAddress.sendValue(reward);
 
         emit LogBurn(transferAddress, tokenAmount, reward);
-
-        // mithrilToken.burnFrom(spender, amount); // check successfull
-
-        // sendEth(spender); // check successfull
     }
 
     /**
@@ -208,6 +216,16 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      */
     function getBurnReward(uint256 tokenAmount) public view returns (uint256) {
         return calculateSaleReturn(mithrilToken.totalSupply(), poolBalance, reserveRatio, tokenAmount);
+    }
+
+    /**
+     * @dev Allows the owner to update the gas price limit
+     * @param _gasPrice The new gas price limit
+     *
+     */
+    function setGasPrice(uint256 _gasPrice) public onlyOwner {
+        require(_gasPrice > 0, "FORBIDDEN: gas price cannot be zero");
+        gasPrice = _gasPrice;
     }
 
     /**
@@ -273,12 +291,5 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
 
         // NOTE: cast last 20 bytes of hash to address
         return address(uint160(uint256(hash)));
-    }
-
-    /**
-     * @dev See {IERC165-supportsInterface}.
-     */
-    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC165) returns (bool) {
-        return interfaceId == type(IERC1363Receiver).interfaceId || super.supportsInterface(interfaceId);
     }
 }

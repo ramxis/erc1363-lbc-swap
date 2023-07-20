@@ -5,8 +5,12 @@ import {
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { any } from "hardhat/internal/core/params/argumentTypes";
 
 describe("LbcTokenSwap", function () {
+
+  // TODO: add tests for front running with higher gas
+  // TODO: add tests for setting gasprice function
   
   // We define a fixtures to reuse the same setup in every test.
   // We use loadFixture to run this setup once, snapshot that state,
@@ -25,8 +29,9 @@ describe("LbcTokenSwap", function () {
     const initialTokenSupply = ethers.parseEther("10");
     const reserveRatio = Math.round(1 / 2 * 1000000) / 1000000; //  recall 1/2 corresponds to LBC
     const solReserveRatio = Math.floor(reserveRatio * 1000000);
+    let gasPrice = ethers.parseUnits("30","gwei");
 
-    const lbcSwap = await ethers.deployContract("LbcTokenSwap", [salt,solReserveRatio,initialTokenSupply]);
+    const lbcSwap = await ethers.deployContract("LbcTokenSwap", [salt,solReserveRatio,initialTokenSupply, gasPrice]);
     await lbcSwap.waitForDeployment();
     
     const tokenAddress = await lbcSwap.tokenAddress();
@@ -65,6 +70,7 @@ describe("LbcTokenSwap", function () {
   }
 
   describe("Deployment", function () {
+
     it("Should deploy the mithril token and initialize parameters correctly on contract creation", async function () {
       const { lbcSwap, mithrilToken, initialTokenSupply, alice  } = await loadFixture(deployLBCSwapContractAndMithrilToken);
       // verify that lbcswap deploys the correct token
@@ -79,6 +85,12 @@ describe("LbcTokenSwap", function () {
       expect(await mithrilToken.balanceOf(alice.address)).to.equal(initialTokenSupply);
 
       expect(await lbcSwap.poolBalance()).to.equal(0);
+    });
+
+    it("should set alice as its owner", async function () {
+      const { lbcSwap, alice  } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+      // verify alice is the contract owner
+      expect(await lbcSwap.owner()).to.equal(alice.address);
     });
   });
 
@@ -120,11 +132,8 @@ describe("LbcTokenSwap", function () {
     });
 
     it('should mint tokens a second time correctly', async () => {
-      const { mithrilToken, alice, bob, solReserveRatio, lbcSwap, swapAddress, initialTokenSupply } = await loadFixture(deployLBCSwapContractAndMithrilToken);
-
-      const initialaliceBalance = await mithrilToken.balanceOf(alice.address);
+      const { mithrilToken, alice, bob, solReserveRatio, lbcSwap, swapAddress } = await loadFixture(deployLBCSwapContractAndMithrilToken);
     
-
       let tx = {
         to: swapAddress,
         value: ethers.parseEther("10")
@@ -158,33 +167,19 @@ describe("LbcTokenSwap", function () {
     
     });
 
-    //TODO: remove
-
-    // it("Should be able to mint new mithril tokens by triggiring fallback in the contract", async function () {
-    //   const { mithrilToken, alice, swapAddress} = await loadFixture(deployLBCSwapContractAndMithrilToken);
-
-    //   // initial supply of mithril is 0
-    //   expect(await mithrilToken.totalSupply()).to.equal(0);
-
-    //   const tx = {
-    //     to: swapAddress,
-    //     value: ethers.parseUnits("10","wei"),
-    //     data: "0x4b729aff0000000000000000000000000000000000000000000000000000000000000001"
-    //   };
+    it('should not be able to mint anything with 0 ETH', async () => {
+      const { alice, swapAddress } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+    
+      let tx = {
+        to: swapAddress,
+        value: 0
+      };
       
-    //   // send 10 wei to the contract
-    //   const transaction = await alice.sendTransaction(tx);
-    //   await transaction.wait();
-      
-    //   // mithril total supply should now be 10 bits
-    //   expect(await mithrilToken.totalSupply()).to.equal(10);
+      // let transaction = await alice.sendTransaction(tx);
+      await expect(alice.sendTransaction(tx)).to.be.
+      revertedWith('FORBIDDEN: only nonzero eth values are accepted');
 
-    //   // alice should own 10 bits mithril tokens
-    //   // mithril total supply should now be 10 bits
-    //   expect(await mithrilToken.balanceOf(alice.address)).to.equal(10);
-
-    // });
-
+    });
     
   });
 
@@ -199,27 +194,116 @@ describe("LbcTokenSwap", function () {
     });
 
     it("Should burn mthril and transfer eth to the user", async function () {
-      // const { lbcSwap, mithrilToken, alice, swapAddress } = await loadFixture(testSetupForTokenBurn);
-      // const contracBalanceBeforeBurn = await ethers.provider.getBalance(swapAddress);
-      // const tokenBalanceBeforeBurn = await mithrilToken.balanceOf(alice.address);
+      const { lbcSwap, mithrilToken, alice, swapAddress } = await loadFixture(testSetupForTokenBurn);
+      const contracBalanceBeforeBurn = await ethers.provider.getBalance(swapAddress);
+      const tokenBalanceBeforeBurn = await mithrilToken.balanceOf(alice.address);
+      const mithrilTokenSupplyBeforeBurn = await mithrilToken.totalSupply();
+      const aliceEthBalanceBeforeBurn = await ethers.provider.getBalance(alice.address);
 
 
-      // const tx = await mithrilToken.connect(alice).transferAndCall(swapAddress,ethers.parseEther("5"))
-      // await tx.wait();
+      const tx = await mithrilToken.connect(alice).transferAndCall(swapAddress,ethers.parseEther("5"))
+      await tx.wait();
       
-      // const contracBalanceAfterBurn = await ethers.provider.getBalance(swapAddress);
-      // const tokenBalanceAfterBurn = await mithrilToken.balanceOf(alice.address);
+      const contracBalanceAfterBurn = await ethers.provider.getBalance(swapAddress);
+      const tokenBalanceAfterBurn = await mithrilToken.balanceOf(alice.address);
+      const mithrilTokenSupplyAfterBurn = await mithrilToken.totalSupply();
+      const aliceEthBalanceAfterBurn = await ethers.provider.getBalance(alice.address);
   
-      // await expect(tx)
-      //   .to.emit(lbcSwap, "TokensReceived")
-      //   .withArgs(alice.address, alice.address, ethers.parseEther("5"),"0x");
+      await expect(tx)
+        .to.emit(lbcSwap, "TokensReceived")
+        .withArgs(alice.address, alice.address, ethers.parseEther("5"));
       
-      // expect(contracBalanceBeforeBurn).to.equal(ethers.parseEther("10"));
-      // expect(contracBalanceAfterBurn).to.equal(ethers.parseEther("5"));
-      // expect(tokenBalanceBeforeBurn).to.equal(ethers.parseEther("10"));
-      // expect(tokenBalanceAfterBurn).to.equal(ethers.parseEther("5"));
+      expect(contracBalanceBeforeBurn).to.equal(ethers.parseEther("10"));
+      expect(contracBalanceAfterBurn).to.be.below(contracBalanceBeforeBurn);
+      expect(tokenBalanceAfterBurn).to.be.below(tokenBalanceBeforeBurn);
+      expect(mithrilTokenSupplyAfterBurn).to.be.below(mithrilTokenSupplyBeforeBurn);
+
+      // alice eth balance should increase after the burn
+      expect(aliceEthBalanceAfterBurn).to.be.above(aliceEthBalanceBeforeBurn);
+      await expect(tx).to.emit(lbcSwap, "LogBurn");
+
+    });
+
+    it("Should burn mthril and transfer all eth to the user", async function () {
+      const { lbcSwap, mithrilToken, alice, swapAddress } = await loadFixture(testSetupForTokenBurn);
+      const contracBalanceBeforeBurn = await ethers.provider.getBalance(swapAddress);
+      const aliceMithBalanceBeforeBurn = await mithrilToken.balanceOf(alice.address);
+      const aliceEthBalanceBeforeBurn = await ethers.provider.getBalance(alice.address);
+
+      expect(contracBalanceBeforeBurn).to.equal(ethers.parseEther("10"));
+      const tx = await mithrilToken.connect(alice).transferAndCall(swapAddress,aliceMithBalanceBeforeBurn)
+      await tx.wait();
+     
+      const contracBalanceAfterBurn = await ethers.provider.getBalance(swapAddress);
+      const aliceMithBalanceAfterBurn = await mithrilToken.balanceOf(alice.address);
+      const mithrilTokenSupplyAfterBurn = await mithrilToken.totalSupply();
+      const aliceEthBalanceAfterBurn = await ethers.provider.getBalance(alice.address);
+  
+      await expect(tx)
+        .to.emit(lbcSwap, "TokensReceived")
+        .withArgs(alice.address, alice.address, aliceMithBalanceBeforeBurn);
+      
+      expect(contracBalanceAfterBurn).to.be.equal(0);
+      expect(aliceMithBalanceAfterBurn).to.be.equal(0);
+      expect(mithrilTokenSupplyAfterBurn).to.be.equal(0);
+      expect(aliceEthBalanceAfterBurn).to.be.above(aliceEthBalanceBeforeBurn)
+      await expect(tx).to.emit(lbcSwap, "LogBurn");
 
     });
 
   });
+
+  describe("Setting gas price", function () {
+
+    it("Should be able to set gas price", async function () {
+      const { lbcSwap, alice, } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+
+      const tx = await lbcSwap.connect(alice).setGasPrice(ethers.parseUnits("20000", "gwei"));
+      await tx.wait();
+      const newGasPrice = await lbcSwap.gasPrice();
+
+      expect(newGasPrice).to.equal(ethers.parseUnits("20000", "gwei"));
+
+    });
+
+    it("Should not be able to set zero as gas price", async function () {
+      const { lbcSwap, alice, } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+
+      await expect(lbcSwap.connect(alice).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
+      .revertedWith("FORBIDDEN: gas price cannot be zero");
+
+    });
+
+    it("Should not be able to change gasPrice if caller is not owner", async function () {
+      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+
+      await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
+      .revertedWith("Ownable: caller is not the owner");
+
+    });
+
+  });
+
+  describe("Front running should be mititgated", function () {
+
+    it("Should revert when attempting to mint with gas price higher then set in the swap contract", async function () {
+      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+      // TODO: add tx for mint with higher gas price
+      await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
+      .revertedWith("Ownable: caller is not the owner");
+
+    });
+
+    it("Should revert when attempting to burn with gas price higher then set in the swap contract", async function () {
+      const { lbcSwap, alice, bob } = await loadFixture(deployLBCSwapContractAndMithrilToken);
+       // TODO: add tx for mint with higher gas price
+      await expect(lbcSwap.connect(bob).setGasPrice(ethers.parseUnits("0", "gwei"))).to.be
+      .revertedWith("Ownable: caller is not the owner");
+
+    });
+
+  });
+
+  // TODO: add ci cd for tests and coverage
+  // TODO: may be add checks for slither ? depends upon time
 });
