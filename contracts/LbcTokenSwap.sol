@@ -20,7 +20,6 @@ import "./BancorFormula.sol";
  *      however it is possible to also program this contract with any slope value from 1 - n
  *      we will just have to adjust the formulas accordingly
  *
- *      to compute poolBalance for any given price use integral y = m * 1/2 * x ^ 2
  *      for the simplest case when m = 1; and b=0, poolBalance = 1/2 * x ^ 2
  *      where x is the totalsupply of mithril.
  *
@@ -32,8 +31,6 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
 
     using Address for address payable; // prettier-ignore
 
-    // uint32 private constant MAX_WEIGHT = 1000000;
-
     /**
      * @dev reserve ratio, represented in ppm, 1-1000000
      *      1/3 corresponds to y= multiple * x^2
@@ -43,6 +40,7 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      *      specificallytotalAmount and poolBalance parameters
      *      we might want to add an 'initialize' function that will allow
      *      the owner to send ether to the contract and mint a given amount of tokens
+     *      We however keep our case simple by minting some _initialSupply supply to owner.
      */
     uint32 public immutable reserveRatio;
 
@@ -131,8 +129,8 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
      *      area = m * 1/2 * x ^ 2 <- total price of all tokens
      *      we can dervive
      *      poolBalance + msg.value = m * 1/2 * (totalSupply_ + newTokens) ^ 2
-     *      first we figure out how many tokens to mint
-     *      2 * (poolBalance + msg.value)^1/2 = m * (totalSupply_ + newTokens)
+     *      first we figure out how many tokens to mint, we use bancors formula to estimate the token amount
+     *      
      * @param price - this is the amount of eth user sent to this cotract
      * @return tokenAmount
      */
@@ -184,9 +182,8 @@ contract LbcTokenSwap is IERC1363Receiver, ERC165, BancorFormula, Context, Reent
     }
 
     /**
-     * @dev Called after validating a `onTransferReceived`. This function MAY throw to revert and reject the
-     *      transfer. Return of other than the magic value MUST result in the
-     *      transaction being reverted.
+     * @dev Called after validating a `onTransferReceived`. 
+     *      This function MAY throw to revert and reject the transfer.
      *
      * @param transferAddress The address from which tokens are received
      * @param tokenAmount The amount of tokens to brun
