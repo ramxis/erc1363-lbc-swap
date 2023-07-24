@@ -12,3 +12,6 @@ This repo is setup with linting script for solidity. It can also be run manually
 ## Tests
 Tests can be run using:
 `npm test`
+
+## Local Deploy
+` npm run localDeploy`
